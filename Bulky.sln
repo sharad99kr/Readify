@@ -15,7 +15,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bulky.Tests", "Bulky.Tests\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bulky.McpServer", "Bulky.McpServer\Bulky.McpServer.csproj", "{376FE7A8-43A7-4478-897D-44BB43DA5698}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bulky_AzureFunction", "Bulky.AzureFunction\Bulky_AzureFunction.csproj", "{24FBED05-D139-43C3-AECE-2F146F1E984B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bulky.AzureFunction", "Bulky.AzureFunction\Bulky.AzureFunction.csproj", "{24FBED05-D139-43C3-AECE-2F146F1E984B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
