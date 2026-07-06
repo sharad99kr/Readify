@@ -47,6 +47,8 @@ jobs:
       with:
         name: functionapp
         path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+    - name: List downloaded files (debug)
+      run: ls -la "${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}"
     - name: Azure Login
       uses: azure/login@v2
       with:
