@@ -1,6 +1,7 @@
 using Azure;
 using Azure.AI.OpenAI;
 using Azure.Identity;
+using Azure.Storage.Blobs;
 using Bulky.DataAccess;
 using Bulky.DataAccess.AI.CQRS.Commands;
 using Bulky.DataAccess.AI.Inventory.Interfaces;
@@ -19,6 +20,11 @@ using System.Security.Authentication;
 
 var host = new HostBuilder()
     .ConfigureFunctionsWorkerDefaults()
+    .ConfigureAppConfiguration((ctx, cfg) => {
+        // For local dev, use local.settings.json (Functions v4 default).
+        // For Azure: Application Settings are injected as env vars automatically.
+        cfg.AddEnvironmentVariables();
+    })
     .ConfigureServices((ctx, services) => {
         var cfg = ctx.Configuration;
 
@@ -39,12 +45,15 @@ var host = new HostBuilder()
 
         // IChatClient for MAF agents (reuse same Azure OpenAI deployment).
         services.AddSingleton<IChatClient>(sp => {
+            
             var endpoint = cfg["AzureOpenAI:Endpoint"]!;
             var deployment = cfg["AzureOpenAI:DeploymentName"]!;
             var apiKey = cfg["AzureOpenAI:ApiKey"];
+            
             AzureOpenAIClient azureClient = string.IsNullOrEmpty(apiKey)
                 ? new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential())
                 : new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(apiKey));
+            
             return azureClient.GetChatClient(deployment)
                 .AsIChatClient()
                 .AsBuilder()
@@ -52,13 +61,30 @@ var host = new HostBuilder()
                 .Build();
         });
 
+        // BlobServiceClient — warehouse data source .
+        // Singleton: the client is thread-safe and connection-pooling.
+        // Prefer a connection string when present (frictionless local dev);
+        // otherwise account URI + DefaultAzureCredential (Managed Identity in
+        // Azure, developer login locally) — same pattern as the AzureOpenAI client.
+        services.AddSingleton<BlobServiceClient>(_ => {
+            var blobConnectionString = cfg["Storage:ConnectionString"];
+            if(!string.IsNullOrWhiteSpace(blobConnectionString)) {
+                return new BlobServiceClient(blobConnectionString);
+            }
+
+            var accountUri = cfg["Storage:AccountUri"]!;
+            return new BlobServiceClient(new Uri(accountUri), new DefaultAzureCredential());
+        });
+
+        services.AddScoped<IWarehouseReader, ExcelWarehouseReader>();
+        //services.AddScoped<IEmailAlertService, EmailAlertService>();
+
         // IInventoryAgentFactory (after Day 2 agents are built).
         services.AddScoped<IInventoryAgentFactory, InventoryAgentFactory>();
 
         // MediatR — scans the assembly for handlers.
         services.AddMediatR(mt => {
-            mt.RegisterServicesFromAssemblyContaining<ProjectCoreAssemblyMarker>();
-            mt.RegisterServicesFromAssemblyContaining<DataAccessAssemblyMarker>();
+            mt.RegisterServicesFromAssemblyContaining<TriggerInventoryCheckCommand>();
         });
 
         // MassTransit — same CloudAMQP config as BulkyWeb.
@@ -68,12 +94,16 @@ var host = new HostBuilder()
         var rabbitPassword = cfg["RabbitMQ:Password"];
 
         services.AddMassTransit(x => {
+
             // The Function is a publisher only — no consumers here.
             // BulkyWeb hosts the consumers (NotificationConsumer,
             // DiscrepancyConsumer, DeadLetterConsumer).
             if(string.IsNullOrWhiteSpace(rabbitHost)) {
+
                 x.UsingInMemory();
+
             } else {
+
                 x.UsingRabbitMq((_, cfg) => {
                     cfg.Host(rabbitHost, rabbitVHost, h => {
                         h.Username(rabbitUser);
@@ -81,6 +111,7 @@ var host = new HostBuilder()
                         h.UseSsl(s => s.Protocol = SslProtocols.Tls12);
                     });
                 });
+
             }
         });
     })
