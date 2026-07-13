@@ -1,6 +1,7 @@
 ﻿using Bulky.DataAccess.AI.Inventory.Interfaces;
 using Bulky.DataAccess.AI.Inventory.Models;
 using Bulky.DataAccess.Repository.IRepository;
+using DocumentFormat.OpenXml.Office.CustomUI;
 using Microsoft.Extensions.Logging;
 using System.ComponentModel;
 
@@ -47,6 +48,74 @@ namespace Bulky.DataAccess.AI.Inventory.Services
                 product.Title,
                 product.StockQuantity,
                 IsLowStock: product.StockQuantity <= LowStockThreshold);
+
+        }
+
+        public ReconciliationResult GetReconciliation(
+            IReadOnlyList<WarehouseStockItem> warehouseItems) {
+            
+            var products = _unitOfWork.Product.GetAll().ToList();
+            var warehouseDict = warehouseItems.ToDictionary(w => w.ProductId);
+
+            var reconciliationItems = new List<ReconciliationItem>();
+            int lowStockCount = 0;
+            int urgentDiscrepancyCount = 0;
+
+            foreach(var product in products) {
+
+                bool isLowStock = product.StockQuantity <= LowStockThreshold;
+
+                if((!warehouseDict.TryGetValue(product.Id, out var warehouseItem)) {
+
+                    if(isLowStock) {
+                        reconciliationItems.Add(new ReconciliationItem(
+                            product.Id,
+                            product.Title,
+                            product.StockQuantity,
+                            WarehouseQuantity: 0,
+                            DiscrepancyPercentage: 100,
+                            EventType: ReconciliationEventType.LowStock));
+                        lowStockCount++;
+                    }
+                    continue;
+                }
+
+                //Discrepancy percent calculation |SQL - Warehouse| / max(SQL, Warehouse, 1) * 100
+                int maxQuantity = Math.Max(Math.Max(warehouseItem.WarehouseQuantity, product.StockQuantity), 1);
+                int discrepancyPercent = (int)(Math.Abs(product.StockQuantity - warehouseItem.WarehouseQuantity) / (double)maxQuantity * 100);
+
+                if(discrepancyPercent > 40) {
+
+                    reconciliationItems.Add(new ReconciliationItem(
+                        product.Id,
+                        product.Title,
+                        product.StockQuantity,
+                        warehouseItem.WarehouseQuantity,
+                        discrepancyPercent,
+                        ReconciliationEventType.UrgentDiscrepancy));
+                    urgentDiscrepancyCount++;
+
+                } else if(isLowStock) {
+                    reconciliationItems.Add(new ReconciliationItem(
+                        product.Id,
+                        product.Title,
+                        product.StockQuantity,
+                        warehouseItem.WarehouseQuantity,
+                        discrepancyPercent,
+                        ReconciliationEventType.LowStock));
+                    lowStockCount++;
+                }
+
+            }
+
+            _logger.LogInformation(
+                "[Inventory] Reconciliation — {Low} low-stock, {Urgent} urgent discrepancies",
+                lowStockCount, urgentDiscrepancyCount);
+
+            return new ReconciliationResult( 
+                reconciliationItems, 
+                lowStockCount, 
+                urgentDiscrepancyCount);
 
         }
     }
