@@ -51,7 +51,7 @@ namespace Bulky.DataAccess.AI.Inventory.Services
 
         }
 
-        public ReconciliationResult GetReconciliation(
+        public ReconciliationResult GetReconciliationResult(
             IReadOnlyList<WarehouseStockItem> warehouseItems) {
             
             var products = _unitOfWork.Product.GetAll().ToList();
