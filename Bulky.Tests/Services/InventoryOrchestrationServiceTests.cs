@@ -21,10 +21,16 @@ namespace Bulky.Tests.Services
     public class InventoryOrchestrationServiceTests
     {
         private static InventoryOrchestrationService Build(
-        IReadOnlyList<InventoryStatusResult> lowStock,
-        Mock<IPublishEndpoint> publish) {
+                                        IReadOnlyList<InventoryStatusResult> lowStock,
+                                        Mock<IPublishEndpoint> publish) 
+        {
             var reader = new Mock<IInventoryReader>();
             reader.Setup(r => r.GetLowStockProducts()).Returns(lowStock);
+
+            var warehouseReader = new Mock<IWarehouseReader>();
+            warehouseReader
+                .Setup(w => w.ReadAllAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync([]);
 
             var agentFactory = new Mock<IInventoryAgentFactory>();
             agentFactory.Setup(f => f.CreateSqlAgent())
@@ -32,6 +38,7 @@ namespace Bulky.Tests.Services
 
             return new InventoryOrchestrationService(
                 reader.Object,
+                warehouseReader.Object,
                 agentFactory.Object,
                 publish.Object,
                 Mock.Of<ILogger<InventoryOrchestrationService>>());

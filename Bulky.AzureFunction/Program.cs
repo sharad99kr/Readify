@@ -77,7 +77,7 @@ var host = new HostBuilder()
         });
 
         services.AddScoped<IWarehouseReader, ExcelWarehouseReader>();
-        //services.AddScoped<IEmailAlertService, EmailAlertService>();
+        services.AddScoped<IEmailAlertService, EmailAlertService>();
 
         // IInventoryAgentFactory (after Day 2 agents are built).
         services.AddScoped<IInventoryAgentFactory, InventoryAgentFactory>();

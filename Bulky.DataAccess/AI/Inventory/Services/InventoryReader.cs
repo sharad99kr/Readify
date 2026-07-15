@@ -65,7 +65,7 @@ namespace Bulky.DataAccess.AI.Inventory.Services
 
                 bool isLowStock = product.StockQuantity <= LowStockThreshold;
 
-                if((!warehouseDict.TryGetValue(product.Id, out var warehouseItem)) {
+                if(!warehouseDict.TryGetValue(product.Id, out var warehouseItem)) {
 
                     if(isLowStock) {
                         reconciliationItems.Add(new ReconciliationItem(
