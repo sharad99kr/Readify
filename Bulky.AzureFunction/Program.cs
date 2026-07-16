@@ -5,6 +5,7 @@ using Azure.Storage.Blobs;
 using Bulky.DataAccess;
 using Bulky.DataAccess.AI.CQRS.Commands;
 using Bulky.DataAccess.AI.Inventory.Interfaces;
+using Bulky.DataAccess.AI.Inventory.Messages;
 using Bulky.DataAccess.AI.Inventory.Services;
 using Bulky.DataAccess.Data;
 using Bulky.DataAccess.Repository;
@@ -16,6 +17,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using ProjectCore;
+using ProjectCore.Consumers;
 using System.Security.Authentication;
 
 var host = new HostBuilder()
@@ -95,20 +97,53 @@ var host = new HostBuilder()
 
         services.AddMassTransit(x => {
 
-            // The Function is a publisher only — no consumers here.
+            
             // BulkyWeb hosts the consumers (NotificationConsumer,
             // DiscrepancyConsumer, DeadLetterConsumer).
+            x.AddConsumer<NotificationConsumer>();
+            x.AddConsumer<DiscrepancyConsumer>();
+            x.AddConsumer<DeadLetterConsumer<StockDiscrepancyDetected>>();
+            x.AddConsumer<DeadLetterConsumer<LowStockDetected>>();
+
             if(string.IsNullOrWhiteSpace(rabbitHost)) {
 
-                x.UsingInMemory();
+                x.UsingInMemory((context, cfg) =>
+                {
+                    cfg.ConfigureEndpoints(context);
+                });
 
             } else {
 
-                x.UsingRabbitMq((_, cfg) => {
+                x.UsingRabbitMq((context, cfg) => {
+
                     cfg.Host(rabbitHost, rabbitVHost, h => {
                         h.Username(rabbitUser);
                         h.Password(rabbitPassword);
                         h.UseSsl(s => s.Protocol = SslProtocols.Tls12);
+                    });
+
+                    cfg.ReceiveEndpoint("low-stock-queue", e => {
+                        e.UseMessageRetry(r => r.Exponential(
+                               retryLimit: 3,
+                               minInterval: TimeSpan.FromSeconds(1),
+                               maxInterval: TimeSpan.FromSeconds(30),
+                               intervalDelta: TimeSpan.FromSeconds(5)));
+                        e.ConfigureConsumer<NotificationConsumer>(context);
+                    });
+
+                    // Discrepancy queue for stock discrepancies.
+                    cfg.ReceiveEndpoint("discrepancy-queue", e => {
+                        e.UseMessageRetry(r => r.Exponential(
+                               retryLimit: 3,
+                               minInterval: TimeSpan.FromSeconds(1),
+                               maxInterval: TimeSpan.FromSeconds(30),
+                               intervalDelta: TimeSpan.FromSeconds(5)));
+                        e.ConfigureConsumer<DiscrepancyConsumer>(context);
+                    });
+
+                    // Dead-letter queues for failed messages.
+                    cfg.ReceiveEndpoint("discrepancy-fault-queue", e => {
+                        e.ConfigureConsumer<DeadLetterConsumer<StockDiscrepancyDetected>>(context);
                     });
                 });
 
