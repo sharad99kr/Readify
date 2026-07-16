@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Bulky.DataAccess.Data;
 using Microsoft.Extensions.Configuration;
+using Azure.Storage.Blobs;
+using Azure.Identity;
 
 var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(args);
 
@@ -15,6 +17,17 @@ builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 // and each tool call creates and disposes its own short-lived context.
 builder.Services.AddDbContextFactory<ApplicationDbContext>(o => o.UseSqlServer(
     builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddSingleton<BlobServiceClient>(sp => {
+    
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var conn = cfg["Storage:ConnectionString"];
+    if(!string.IsNullOrWhiteSpace(conn))
+        return new BlobServiceClient(conn);
+    var accountUri = cfg["Storage:AccountUri"]!;
+    return new BlobServiceClient(new Uri(accountUri), new DefaultAzureCredential());
+
+});
 
 builder.Services.AddMcpServer().WithStdioServerTransport().WithToolsFromAssembly();
 
