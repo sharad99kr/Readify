@@ -17,6 +17,7 @@ using ProjectCore.Hubs;
 using Stripe;
 using System.Security.Authentication;
 using System.Threading.RateLimiting;
+using Bulky.DataAccess.AI.Inventory.Messages;   // StockDiscrepancyDetected, LowStockDetected
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -116,7 +117,12 @@ var rabbitPassword = builder.Configuration["RabbitMQ:Password"];
 
 builder.Services.AddMassTransit(x => {
 
+    // BulkyWeb hosts every consumer — they push SignalR, which only has
+    // meaning in a process with connected browser clients.
     x.AddConsumer<NotificationConsumer>();
+    x.AddConsumer<DiscrepancyConsumer>();
+    x.AddConsumer<DeadLetterConsumer<StockDiscrepancyDetected>>();
+    x.AddConsumer<DeadLetterConsumer<LowStockDetected>>();
 
     if(string.IsNullOrWhiteSpace(rabbitHost)) {
 
@@ -129,7 +135,7 @@ builder.Services.AddMassTransit(x => {
         // CloudAMQP RabbitMQ — accessible from local dev and Azure App Service.
         // TLS is mandatory on the CloudAMQP free tier (amqps:// only).
         x.UsingRabbitMq((context, cfg) => {
-            cfg.Host(rabbitHost, rabbitVHost, h => {
+            cfg.Host(rabbitHost, 5671, rabbitVHost, h => {
                 h.Username(rabbitUser);
                 h.Password(rabbitPassword);
                 h.UseSsl(s => s.Protocol = SslProtocols.Tls12);
@@ -146,6 +152,25 @@ builder.Services.AddMassTransit(x => {
                     intervalDelta: TimeSpan.FromSeconds(5)));
 
                 e.ConfigureConsumer<NotificationConsumer>(context);
+            });
+
+            cfg.ReceiveEndpoint("discrepancy-queue", e => {
+                e.UseMessageRetry(r => r.Exponential(
+                    retryLimit: 3,
+                    minInterval: TimeSpan.FromSeconds(1),
+                    maxInterval: TimeSpan.FromSeconds(30),
+                    intervalDelta: TimeSpan.FromSeconds(5)));
+
+                e.ConfigureConsumer<DiscrepancyConsumer>(context);
+            });
+
+            // Dead-letter queues — terminal handling after retries are exhausted.
+            cfg.ReceiveEndpoint("discrepancy-fault-queue", e => {
+                e.ConfigureConsumer<DeadLetterConsumer<StockDiscrepancyDetected>>(context);
+            });
+
+            cfg.ReceiveEndpoint("low-stock-fault-queue", e => {
+                e.ConfigureConsumer<DeadLetterConsumer<LowStockDetected>>(context);
             });
         });
     }

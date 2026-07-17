@@ -128,7 +128,10 @@ namespace Bulky.DataAccess.AI.Inventory.Services
 
             }
 
-            return new InventoryCheckResult(scan.Items.Count,published,briefing);
+            return new InventoryCheckResult(
+                                            LowStockCount: scan.LowStockCount,
+                                            AlertsPublished: published,
+                                            Briefing: briefing);
 
         }
 

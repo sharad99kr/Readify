@@ -16,9 +16,6 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using ProjectCore;
-using ProjectCore.Consumers;
-using System.Security.Authentication;
 
 var host = new HostBuilder()
     .ConfigureFunctionsWorkerDefaults()
@@ -74,8 +71,15 @@ var host = new HostBuilder()
                 return new BlobServiceClient(blobConnectionString);
             }
 
+            var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions {
+                ExcludeVisualStudioCredential = true,
+                ExcludeVisualStudioCodeCredential = true,
+                ExcludeAzurePowerShellCredential = true,
+                ExcludeWorkloadIdentityCredential = true
+            });
+
             var accountUri = cfg["Storage:AccountUri"]!;
-            return new BlobServiceClient(new Uri(accountUri), new DefaultAzureCredential());
+            return new BlobServiceClient(new Uri(accountUri), credential);
         });
 
         services.AddScoped<IWarehouseReader, ExcelWarehouseReader>();
@@ -89,64 +93,20 @@ var host = new HostBuilder()
             mt.RegisterServicesFromAssemblyContaining<TriggerInventoryCheckCommand>();
         });
 
-        // MassTransit — same CloudAMQP config as BulkyWeb.
-        var rabbitHost = cfg["RabbitMQ:Host"];
-        var rabbitVHost = cfg["RabbitMQ:VHost"];
-        var rabbitUser = cfg["RabbitMQ:Username"];
-        var rabbitPassword = cfg["RabbitMQ:Password"];
+
+        // MassTransit — publish-only. The Function raises StockDiscrepancyDetected
+        // and LowStockDetected; BulkyWeb hosts every consumer (they push SignalR,
+        // which has no meaning in a Functions host).
+        var rabbitConnectionString =  cfg["RabbitMQ:ConnectionString"];
 
         services.AddMassTransit(x => {
-
-            
-            // BulkyWeb hosts the consumers (NotificationConsumer,
-            // DiscrepancyConsumer, DeadLetterConsumer).
-            x.AddConsumer<NotificationConsumer>();
-            x.AddConsumer<DiscrepancyConsumer>();
-            x.AddConsumer<DeadLetterConsumer<StockDiscrepancyDetected>>();
-            x.AddConsumer<DeadLetterConsumer<LowStockDetected>>();
-
-            if(string.IsNullOrWhiteSpace(rabbitHost)) {
-
-                x.UsingInMemory((context, cfg) =>
-                {
-                    cfg.ConfigureEndpoints(context);
-                });
-
+            if(string.IsNullOrWhiteSpace(rabbitConnectionString)) {
+                x.UsingInMemory((context, busCfg) => busCfg.ConfigureEndpoints(context));
             } else {
-
-                x.UsingRabbitMq((context, cfg) => {
-
-                    cfg.Host(rabbitHost, rabbitVHost, h => {
-                        h.Username(rabbitUser);
-                        h.Password(rabbitPassword);
-                        h.UseSsl(s => s.Protocol = SslProtocols.Tls12);
-                    });
-
-                    cfg.ReceiveEndpoint("low-stock-queue", e => {
-                        e.UseMessageRetry(r => r.Exponential(
-                               retryLimit: 3,
-                               minInterval: TimeSpan.FromSeconds(1),
-                               maxInterval: TimeSpan.FromSeconds(30),
-                               intervalDelta: TimeSpan.FromSeconds(5)));
-                        e.ConfigureConsumer<NotificationConsumer>(context);
-                    });
-
-                    // Discrepancy queue for stock discrepancies.
-                    cfg.ReceiveEndpoint("discrepancy-queue", e => {
-                        e.UseMessageRetry(r => r.Exponential(
-                               retryLimit: 3,
-                               minInterval: TimeSpan.FromSeconds(1),
-                               maxInterval: TimeSpan.FromSeconds(30),
-                               intervalDelta: TimeSpan.FromSeconds(5)));
-                        e.ConfigureConsumer<DiscrepancyConsumer>(context);
-                    });
-
-                    // Dead-letter queues for failed messages.
-                    cfg.ReceiveEndpoint("discrepancy-fault-queue", e => {
-                        e.ConfigureConsumer<DeadLetterConsumer<StockDiscrepancyDetected>>(context);
-                    });
+                x.UsingRabbitMq((context, busCfg) => {
+                    busCfg.Host(new Uri(rabbitConnectionString));
+                    // No ReceiveEndpoints: this host does not consume.
                 });
-
             }
         });
     })

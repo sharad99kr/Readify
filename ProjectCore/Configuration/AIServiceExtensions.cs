@@ -3,6 +3,7 @@ using Azure.AI.OpenAI;
 using Azure.Identity;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
+using Azure.Storage.Blobs;
 using Bulky.DataAccess.AI.Inventory.Interfaces;
 using Bulky.DataAccess.AI.Inventory.Services;
 using Bulky.DataAccess.Repository;
@@ -125,27 +126,45 @@ namespace ProjectCore.Configuration
                 services.AddScoped<IInventoryAgentFactory, InventoryAgentFactory>();
                 services.AddScoped<IInventoryOrchestrator, InventoryOrchestrationService>();
 
-                services.AddSingleton<IChatClient>(sp =>
+                services.AddScoped<IWarehouseReader, ExcelWarehouseReader>();
+                services.AddScoped<IEmailAlertService, EmailAlertService>();
+
+                services.AddSingleton<BlobServiceClient>(sp =>
                     {
-                        var config = sp.GetRequiredService<IConfiguration>();
-                        var endpoint = config["AzureOpenAI:Endpoint"]!;
-                        var deploymentName = config["AzureOpenAI:DeploymentName"]!;
+                        var cfg = sp.GetRequiredService<IConfiguration>();
 
-                        var apiKey = config["AzureOpenAI:ApiKey"]!;
-                        AzureOpenAIClient azureClient = string.IsNullOrEmpty(apiKey) 
-                            ? new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential()) 
-                            : new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(apiKey));
+                        // Frictionless local dev: full connection string if present
+                        var conn = cfg["Storage:ConnectionString"];
+                        if(!string.IsNullOrWhiteSpace(conn))
+                            return new BlobServiceClient(conn);
 
-                        return azureClient
-                                .GetChatClient(deploymentName)
-                                .AsIChatClient()
-                                .AsBuilder()
-                                .UseFunctionInvocation()
-                                .Build();
+                        // Otherwise account URI + DefaultAzureCredential
+                        // (managed identity in Azure, az login / VS identity locally)
+                        var accountUri = cfg["Storage:AccountUri"]!;
+                        return new BlobServiceClient(new Uri(accountUri), new DefaultAzureCredential());
                     });
 
-                    return services;
-            }
+            services.AddSingleton<IChatClient>(sp =>
+                        {
+                            var config = sp.GetRequiredService<IConfiguration>();
+                            var endpoint = config["AzureOpenAI:Endpoint"]!;
+                            var deploymentName = config["AzureOpenAI:DeploymentName"]!;
+
+                            var apiKey = config["AzureOpenAI:ApiKey"]!;
+                            AzureOpenAIClient azureClient = string.IsNullOrEmpty(apiKey) 
+                                ? new AzureOpenAIClient(new Uri(endpoint), new DefaultAzureCredential()) 
+                                : new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(apiKey));
+
+                            return azureClient
+                                    .GetChatClient(deploymentName)
+                                    .AsIChatClient()
+                                    .AsBuilder()
+                                    .UseFunctionInvocation()
+                                    .Build();
+                        });
+
+                        return services;
+                }
     }
 
     
