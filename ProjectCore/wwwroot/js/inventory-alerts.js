@@ -18,6 +18,7 @@
         .build();
 
     connection.on("ReceiveAlert", renderAlert);
+    connection.on("ReceiveDiscrepancyAlert", renderAlert);
 
     connection.onreconnecting(() => setState("Reconnecting...", "text-warning"));
     connection.onreconnecting(() => setState("Connected", "text-success"));
@@ -64,7 +65,7 @@
         const card = document.createElement("div");
         // Urgent = red, Routine = amber/yellow. Bootstrap utility classes;
 
-        card.className = "p-2 rounded border" +
+        card.className = "p-2 rounded border " +
             (urgent ? "border-danger bg-danger-subtle" : "border-warning bg-warning-subtle");
 
         card.innerHTML =
@@ -80,7 +81,7 @@
             return;
         }
         stateEl.textContent = text;
-        stateEl.className = "small mb-2" + cls;
+        stateEl.className = "small mb-2 " + cls;
     }
 
     function escapeHtml(s) {
