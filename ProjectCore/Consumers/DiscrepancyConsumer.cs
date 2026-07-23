@@ -21,6 +21,11 @@ namespace ProjectCore.Consumers
             var message = context.Message;
             _logger.LogInformation("Received stock discrepancy for ProductId: {ProductId}, DiscrepancyPercent: {Discrepancy}", message.ProductId, message.DiscrepancyPercent);
             
+            if(message.ProductName == "POISON")
+            {
+                _logger.LogWarning("ProductName is POISION. Skipping alert.");
+                throw new InvalidOperationException("Deliberate dead-letter test");
+            }
             var alert = new InventoryAlert (
                 ProductId: message.ProductId,
                 ProductName: message.ProductName,
