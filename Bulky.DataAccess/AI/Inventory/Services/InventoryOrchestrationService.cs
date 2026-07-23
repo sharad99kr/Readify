@@ -72,38 +72,51 @@ namespace Bulky.DataAccess.AI.Inventory.Services
             // ---- Step 3: deterministic publish — one event per reconciliation item ----
             var published = 0;
 
-            foreach(var item in scan.Items) { 
-            
+            foreach(var item in scan.Items) {
+
                 if(item.EventType == ReconciliationEventType.UrgentDiscrepancy) {
                     await _publishEndpoint.Publish(
-                        
+
                         new StockDiscrepancyDetected(
-                            item.ProductId, 
-                            item.ProductName, 
+                            item.ProductId,
+                            item.ProductName,
                             item.SqlQuantity,
                             item.WarehouseQuantity,
                             item.DiscrepancyPercentage,
-                            "Urgent"), 
+                            "Urgent"),
                         cancellationToken);
 
                     published++;
 
                 } else {
                     var priority = item.SqlQuantity == 0 ? "Urgent" : "Routine";
-                    
+
                     await _publishEndpoint.Publish(
                         new LowStockDetected(
-                            item.ProductId, 
-                            item.ProductName, 
-                            item.SqlQuantity, 
+                            item.ProductId,
+                            item.ProductName,
+                            item.SqlQuantity,
                             InventoryReader.LowStockThreshold,
-                            priority), 
+                            priority),
                         cancellationToken);
 
                     published++;
                 }
 
             }
+
+            // ---- TEMPORARY: dead-letter path test — remove before commit ----
+            await _publishEndpoint.Publish(
+                new StockDiscrepancyDetected(
+                    -1,
+                    "POISON",
+                    0,
+                    0,
+                    0,
+                    "Urgent"),
+                cancellationToken);
+            published++;
+            // ---- END TEMPORARY ----
 
             _logger.LogInformation(
                     "[Inventory] Published {Count} event(s) — {Low} low-stock, " +
