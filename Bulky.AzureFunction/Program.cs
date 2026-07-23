@@ -16,6 +16,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using System.Security.Authentication;
 
 var host = new HostBuilder()
     .ConfigureFunctionsWorkerDefaults()
@@ -97,14 +98,24 @@ var host = new HostBuilder()
         // MassTransit — publish-only. The Function raises StockDiscrepancyDetected
         // and LowStockDetected; BulkyWeb hosts every consumer (they push SignalR,
         // which has no meaning in a Functions host).
-        var rabbitConnectionString =  cfg["RabbitMQ:ConnectionString"];
+        var rabbitHost = cfg["RabbitMQ:Host"];
+        var rabbitVHost = cfg["RabbitMQ:VHost"];
+        var rabbitUser = cfg["RabbitMQ:Username"];
+        var rabbitPassword = cfg["RabbitMQ:Password"];
 
-        services.AddMassTransit(x => {
-            if(string.IsNullOrWhiteSpace(rabbitConnectionString)) {
+        services.AddMassTransit(x =>
+        {
+            if(string.IsNullOrWhiteSpace(rabbitHost)) {
                 x.UsingInMemory((context, busCfg) => busCfg.ConfigureEndpoints(context));
             } else {
-                x.UsingRabbitMq((context, busCfg) => {
-                    busCfg.Host(new Uri(rabbitConnectionString));
+                x.UsingRabbitMq((context, busCfg) =>
+                {
+                    busCfg.Host(rabbitHost, 5671, rabbitVHost, h =>
+                    {
+                        h.Username(rabbitUser);
+                        h.Password(rabbitPassword);
+                        h.UseSsl(s => s.Protocol = SslProtocols.Tls12);
+                    });
                     // No ReceiveEndpoints: this host does not consume.
                 });
             }
