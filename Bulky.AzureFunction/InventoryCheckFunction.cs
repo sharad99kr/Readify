@@ -24,7 +24,7 @@ public class InventoryCheckFunction
     // NCRONTAB for Azure Functions: "0 0 * * * *"
     // For testing locally, change to "0 */5 * * * *" (every 5 minutes).
     [Function("InventoryCheckFunction")]
-    public async Task Run([TimerTrigger("0 0 * * * *")] TimerInfo myTimer, CancellationToken ct)
+    public async Task Run([TimerTrigger("%InventoryCheckSchedule%")] TimerInfo myTimer, CancellationToken ct)
     {
         _logger.LogInformation(
               "[AzureFunction] InventoryCheckFunction fired at {Time}", DateTime.UtcNow);
