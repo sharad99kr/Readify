@@ -75,14 +75,14 @@ namespace Bulky.DataAccess.AI.Inventory.Services
                 instructions: NotificationAgentInstructions);
         }
 
-        public AIAgent CreateEmailAgent() {
-            return new ChatClientAgent(
-                _chatClient,
-                name: "EmailAgent",
-                instructions: EmailAgentInstructions,
-                tools: [AIFunctionFactory.Create(_emailService.SendAlertEmailAsync)]
-                );
-        }
+        public AIAgent CreateEmailAgent() =>
+        new ChatClientAgent(
+            _chatClient,
+            name: "EmailAgent",
+            instructions: EmailAgentInstructions,
+            tools: [ AIFunctionFactory.Create(
+                                _emailService.SendAlertEmailAsync,
+                                new AIFunctionFactoryOptions { Name = "send_alert_email" }) ]);
         public AIAgent CreateReconciliationAgent() {
             return new ChatClientAgent(
                 _chatClient,

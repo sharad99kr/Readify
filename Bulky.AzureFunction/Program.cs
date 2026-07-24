@@ -11,11 +11,13 @@ using Bulky.DataAccess.Data;
 using Bulky.DataAccess.Repository;
 using Bulky.DataAccess.Repository.IRepository;
 using MassTransit;
+using Microsoft.Azure.Functions.Worker;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using System.Security.Authentication;
 
 var host = new HostBuilder()
@@ -42,6 +44,13 @@ var host = new HostBuilder()
         // Inventory services.
         services.AddScoped<IInventoryReader, InventoryReader>();
         services.AddScoped<IInventoryOrchestrator, InventoryOrchestrationService>();
+
+        services.Configure<LoggerFilterOptions>(options => {
+            var defaultRule = options.Rules.FirstOrDefault(rule =>
+                rule.ProviderName == "Microsoft.Extensions.Logging.ApplicationInsights.ApplicationInsightsLoggerProvider");
+            if(defaultRule is not null)
+                options.Rules.Remove(defaultRule);
+        });
 
         // IChatClient for MAF agents (reuse same Azure OpenAI deployment).
         services.AddSingleton<IChatClient>(sp => {

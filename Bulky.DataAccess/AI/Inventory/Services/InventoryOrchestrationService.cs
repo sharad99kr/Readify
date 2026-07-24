@@ -141,8 +141,8 @@ namespace Bulky.DataAccess.AI.Inventory.Services
         //tool and reports findings; then the notification agent reads the SQL agent's
         //output and produces a briefing.
         private async Task<string> BuildReconciliationBriefingAsync(ReconciliationResult scan,
-                                                IReadOnlyList<WarehouseStockItem> warehouseItems,
-                                                CancellationToken ct) {
+                                        IReadOnlyList<WarehouseStockItem> warehouseItems,
+                                        CancellationToken ct) {
 
             try {
 
@@ -150,9 +150,6 @@ namespace Bulky.DataAccess.AI.Inventory.Services
                 AIAgent excelAgent = _agentFactory.CreateExcelAgent();
                 AIAgent reconciliationAgent = _agentFactory.CreateReconciliationAgent();
 
-                // Group chat: SQL and Excel agents present their data;
-                // Reconciliation agent synthesises and concludes.
-                // RoundRobinGroupChatManager: SQL → Excel → Reconciliation, then terminates.
                 Workflow workflow = AgentWorkflowBuilder
                     .CreateGroupChatBuilderWith(agents =>
                         new RoundRobinGroupChatManager(agents) {
@@ -161,17 +158,14 @@ namespace Bulky.DataAccess.AI.Inventory.Services
                     .AddParticipants(new AIAgent[] { sqlAgent, excelAgent, reconciliationAgent })
                     .Build();
 
-               List<ChatMessage> input =
-               [
-                   new(ChatRole.User,
-                        "Run the scheduled inventory reconciliation. " +
-                        "Compare SQL quantities against warehouse quantities " +
-                        "and produce a reconciliation report for the administrator.")
-               ];
+                List<ChatMessage> input =
+                [
+                    new(ChatRole.User,
+                "Run the scheduled inventory reconciliation. " +
+                "Compare SQL quantities against warehouse quantities " +
+                "and produce a reconciliation report for the administrator.")
+                ];
 
-                //the workflow starts running, and instead of a final result you get back a StreamingRun —
-                //a handle to the live, in-flight execution. The workflow then pushes events at you as things happen:
-                //an agent started its turn, an agent produced a message, the workflow finished, etc.
                 await using StreamingRun run = await InProcessExecution
                                                 .RunStreamingAsync(workflow, input, cancellationToken: ct);
 
@@ -179,29 +173,37 @@ namespace Bulky.DataAccess.AI.Inventory.Services
 
                 string briefing = string.Empty;
 
-                await foreach(WorkflowEvent workEvent in run.WatchStreamAsync() ) 
-                {
-                    if(workEvent is WorkflowOutputEvent outputEvent) 
-                    {
-                        if(outputEvent.As<List<ChatMessage>>() is { Count: > 0 } msgs) 
-                        {
-                            briefing = msgs.Last().Text ?? string.Empty;
-                            _logger.LogInformation(
-                                "[Inventory] ReconciliationAgent output: {Output}",
-                                briefing);
-                        }
+                await foreach(WorkflowEvent workEvent in run.WatchStreamAsync()) {
+
+                    _logger.LogInformation(
+                        "[Inventory] Briefing stream event: {Type} | IsOutput={IsOut}",
+                        workEvent.GetType().Name,
+                        workEvent is WorkflowOutputEvent);
+
+                    if(workEvent is WorkflowOutputEvent outputEvent
+                       && outputEvent.As<List<ChatMessage>>() is { Count: > 0 } msgs) {
+
+                        briefing = msgs.Last().Text ?? string.Empty;
+
+                        _logger.LogInformation(
+                            "[Inventory] ReconciliationAgent output: {Output}", briefing);
+
                         break;
                     }
 
+                    if(workEvent is ExecutorFailedEvent failedEvt) {
+                        _logger.LogWarning("[Inventory] Briefing executor failed: {Details}", failedEvt.ToString());
+                        break;
+                    }
                 }
 
+                _logger.LogInformation("[Inventory] Reconciliation briefing: {Briefing}", briefing);
+
                 return string.IsNullOrWhiteSpace(briefing) ?
-                    DeterministicReconciliationSummary(scan) 
+                    DeterministicReconciliationSummary(scan)
                     : briefing.Trim();
 
-
-            }
-            catch(Exception ex) {
+            } catch(Exception ex) {
                 _logger.LogWarning(ex,
                     "[Inventory] Reconciliation briefing failed — using deterministic summary");
                 return DeterministicReconciliationSummary(scan);
@@ -210,10 +212,10 @@ namespace Bulky.DataAccess.AI.Inventory.Services
 
 
         public async Task SendEmailAlertAsync(
-                            ReconciliationResult scan,
-                            string briefing,
-                            CancellationToken ct) 
-        {
+                                        ReconciliationResult scan,
+                                        string briefing,
+                                        CancellationToken ct) {
+            _logger.LogInformation("[Inventory] SendEmailAlertAsync BUILD MARKER v3-payload-guard");
             try {
 
                 AIAgent emailAgent = _agentFactory.CreateEmailAgent();
@@ -224,9 +226,9 @@ namespace Bulky.DataAccess.AI.Inventory.Services
                 List<ChatMessage> input =
                 [
                     new(ChatRole.User,
-                        $"Send an urgent stock alert email. " +
-                        $"There are {scan.UrgentDiscrepancyCount} urgent discrepancies. " +
-                        $"Briefing: {briefing}")
+                $"Send an urgent stock alert email. " +
+                $"There are {scan.UrgentDiscrepancyCount} urgent discrepancies. " +
+                $"Briefing: {briefing}")
                 ];
 
                 await using StreamingRun run = await InProcessExecution
@@ -234,24 +236,49 @@ namespace Bulky.DataAccess.AI.Inventory.Services
 
                 await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
 
-                await foreach(WorkflowEvent workEvent in run.WatchStreamAsync() ) 
-                {
-                    if(workEvent is WorkflowOutputEvent outputEvent) 
-                    {
-                        if(outputEvent.As<List<ChatMessage>>() is { Count: > 0 } msgs) 
-                        {
-                            string emailOutput = msgs.Last().Text ?? string.Empty;
+                bool completed = false;
+
+                await foreach(WorkflowEvent evt in run.WatchStreamAsync()) {
+
+                    _logger.LogInformation(
+                        "[Inventory] EmailAgent stream event: {Type} | IsOutput={IsOut} | Base={Base}",
+                        evt.GetType().Name,
+                        evt is WorkflowOutputEvent,
+                        evt.GetType().BaseType?.Name);
+
+                    // Match on the payload, not just the type. A derived event such as
+                    // AgentResponseUpdateEvent may satisfy `is WorkflowOutputEvent` while
+                    // carrying a streaming delta rather than the final message list —
+                    // breaking on it abandons the run before the tool call completes.
+                    if(evt is WorkflowOutputEvent outputEvt
+                       && outputEvt.As<List<ChatMessage>>() is { Count: > 0 } msgs) {
+
+                        completed = true;
+
+                        foreach(var msg in msgs) {
+                            var contentTypes = string.Join(", ", msg.Contents.Select(c => c.GetType().Name));
                             _logger.LogInformation(
-                                "[Inventory] EmailAgent output: {Output}",
-                                emailOutput);
+                                "[Inventory] EmailAgent message — Role: {Role} | ContentTypes: {Types} | Text: {Text}",
+                                msg.Role, contentTypes, msg.Text);
                         }
+
+                        _logger.LogInformation(
+                            "[Inventory] EmailAgent completed for {Urgent} urgent discrepancy items",
+                            scan.UrgentDiscrepancyCount);
+
+                        break;
+                    }
+
+                    if(evt is ExecutorFailedEvent failedEvt) {
+                        _logger.LogWarning("[Inventory] EmailAgent executor failed: {Details}", failedEvt.ToString());
                         break;
                     }
                 }
 
-                _logger.LogInformation(
-                    "[Inventory] EmailAgent completed for {Urgent} urgent discrepancy items",
-                    scan.UrgentDiscrepancyCount);
+                if(!completed) {
+                    _logger.LogWarning(
+                        "[Inventory] EmailAgent stream ended without a usable WorkflowOutputEvent — email may not have been sent");
+                }
 
             } catch(Exception ex) {
 
